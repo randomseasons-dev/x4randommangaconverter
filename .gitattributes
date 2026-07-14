@@ -1,0 +1,25 @@
+# Normalize line endings: store LF in the repo, check out native on Windows.
+# Silences the "LF will be replaced by CRLF" warnings.
+* text=auto
+
+# Explicit text types
+*.rs      text
+*.toml    text
+*.ts      text
+*.tsx     text
+*.js      text
+*.jsx     text
+*.json    text
+*.css     text
+*.html    text
+*.md      text
+
+# Binary assets — never touch line endings
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.ico     binary
+*.icns    binary
+*.svg     text
+*.xtch    binary
+*.cbz     binary
