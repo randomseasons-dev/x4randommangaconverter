@@ -1,0 +1,20 @@
+[package]
+name = "xtch-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "xtch_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xtch-cli"
+path = "src/main.rs"
+
+[dependencies]
+image = "0.25"
+imageproc = "0.25"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.dev]
+opt-level = 1

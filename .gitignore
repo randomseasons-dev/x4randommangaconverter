@@ -1,0 +1,17 @@
+# Rust build artifacts
+target/
+**/target/
+
+# Node
+node_modules/
+dist/
+
+# Tauri generated
+xteink/src-tauri/gen/schemas/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
