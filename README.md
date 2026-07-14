@@ -1,3 +1,14 @@
+# Ver 1.2 changelog:
+- Added preview panel.
+- Added white border adjustment rate bar. 
+- Fixed dropping  files not working. 
+
+# Future features:
+- Customizable double-page display. Currently fixed: full page then split. 
+- Customizable dithering method. 
+- Customizable contrast and other rendering features. 
+- Other ideas. 
+
 # XTEink Manga Creator
 
 An **offline** desktop app that converts manga (CBZ/CBR archives or folders of images)
@@ -21,24 +32,7 @@ processing runs locally.
 - **Dithering:** Floyd–Steinberg to 4 gray levels (2-bit XTCH).
 - **Output:** byte-exact `.xtch` packing, with an in-app page preview.
 
-## Project layout
 
-- `xtch-core/` — pure-Rust library: input reading, image pipeline, and the `.xtch` codec.
-  Includes `xtch-cli` for headless conversion/testing.
-- `xteink/` — the Tauri desktop app (React frontend + Rust commands wrapping `xtch-core`).
-
-## Build
-
-Prerequisites: Rust (MSVC toolchain), Node.js, and the WebView2 runtime (Windows).
-
-```sh
-cd xteink
-npm install
-npm run tauri dev     # run in development
-npm run tauri build   # produce a standalone .exe + installers
-```
-
-The standalone build lands in `xteink/src-tauri/target/release/`.
 
 ## The `.xtch` format
 
