@@ -3,12 +3,12 @@
 pub mod pipeline;
 pub mod xtch;
 
-pub use pipeline::{Orientation, Settings, Split};
+pub use pipeline::{convert_streaming, Orientation, Settings, Split};
 pub use xtch::{encode_xtch, Page};
 
-use image::RgbaImage;
-use std::io::Read;
-use std::path::Path;
+use image::GrayImage;
+use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
 
 fn is_image_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
@@ -20,9 +20,43 @@ fn is_image_name(name: &str) -> bool {
         || n.ends_with(".gif")
 }
 
-/// Read all images from a folder (sorted by filename), decoded to RGBA.
-pub fn read_folder(dir: &Path) -> Result<Vec<RgbaImage>, String> {
-    let mut names: Vec<_> = std::fs::read_dir(dir)
+/// A lazily-loadable source image: either a file on disk or in-memory (compressed) bytes.
+pub enum Loader {
+    Path(PathBuf),
+    Bytes(Vec<u8>),
+}
+
+impl Loader {
+    /// Cheap dimensions read (header only for files; header parse for bytes).
+    pub fn dims(&self) -> Result<(u32, u32), String> {
+        match self {
+            Loader::Path(p) => {
+                image::image_dimensions(p).map_err(|e| format!("{}: {}", p.display(), e))
+            }
+            Loader::Bytes(b) => image::ImageReader::new(Cursor::new(b))
+                .with_guessed_format()
+                .map_err(|e| e.to_string())?
+                .into_dimensions()
+                .map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Decode to 8-bit grayscale.
+    pub fn load_luma(&self) -> Result<GrayImage, String> {
+        match self {
+            Loader::Path(p) => image::open(p)
+                .map(|i| i.to_luma8())
+                .map_err(|e| format!("{}: {}", p.display(), e)),
+            Loader::Bytes(b) => image::load_from_memory(b)
+                .map(|i| i.to_luma8())
+                .map_err(|e| e.to_string()),
+        }
+    }
+}
+
+/// List loadable images from a folder (sorted by filename).
+fn list_folder(dir: &Path) -> Result<Vec<Loader>, String> {
+    let mut names: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
@@ -34,16 +68,12 @@ pub fn read_folder(dir: &Path) -> Result<Vec<RgbaImage>, String> {
         })
         .collect();
     names.sort();
-    let mut out = Vec::new();
-    for p in names {
-        let img = image::open(&p).map_err(|e| format!("{}: {}", p.display(), e))?;
-        out.push(img.to_rgba8());
-    }
-    Ok(out)
+    Ok(names.into_iter().map(Loader::Path).collect())
 }
 
-/// Read all images from a CBZ (zip) archive, sorted by entry name.
-pub fn read_cbz(path: &Path) -> Result<Vec<RgbaImage>, String> {
+/// List loadable images from a CBZ (zip), sorted by entry name. Holds only the
+/// (compressed) image bytes in memory, not decoded pixels.
+fn list_cbz(path: &Path) -> Result<Vec<Loader>, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     let mut names: Vec<String> = (0..zip.len())
@@ -51,33 +81,72 @@ pub fn read_cbz(path: &Path) -> Result<Vec<RgbaImage>, String> {
         .filter(|n| is_image_name(n))
         .collect();
     names.sort();
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(names.len());
     for n in names {
         let mut f = zip.by_name(&n).map_err(|e| e.to_string())?;
         let mut bytes = Vec::new();
         f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-        let img = image::load_from_memory(&bytes).map_err(|e| format!("{}: {}", n, e))?;
-        out.push(img.to_rgba8());
+        out.push(Loader::Bytes(bytes));
     }
     Ok(out)
 }
 
-/// Read either a `.cbz`/`.zip` file or a directory of images.
-pub fn read_input(path: &Path) -> Result<Vec<RgbaImage>, String> {
+/// List images from either a `.cbz`/`.zip` file or a directory of images.
+pub fn list_input(path: &Path) -> Result<Vec<Loader>, String> {
     if path.is_dir() {
-        read_folder(path)
+        list_folder(path)
     } else {
-        read_cbz(path)
+        list_cbz(path)
     }
 }
 
-/// Read input + run the pipeline, returning the ordered pages (before packing).
-pub fn convert_pages(path: &Path, settings: &Settings) -> Result<Vec<Page>, String> {
-    let imgs = read_input(path)?;
-    if imgs.is_empty() {
+/// Cheaply count images in an input without decoding pixels (for progress totals).
+pub fn count_images(path: &Path) -> usize {
+    if path.is_dir() {
+        std::fs::read_dir(path)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.path()
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .map(is_image_name)
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    } else {
+        std::fs::File::open(path)
+            .ok()
+            .and_then(|f| zip::ZipArchive::new(f).ok())
+            .map(|mut z| {
+                (0..z.len())
+                    .filter_map(|i| z.by_index(i).ok().map(|f| f.name().to_string()))
+                    .filter(|n| is_image_name(n))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+}
+
+/// Read input + run the pipeline (streaming), reporting per-image progress via `on_progress(done)`.
+pub fn convert_pages_cb(
+    path: &Path,
+    settings: &Settings,
+    on_progress: impl FnMut(usize),
+) -> Result<Vec<Page>, String> {
+    let loaders = list_input(path)?;
+    if loaders.is_empty() {
         return Err("no images found in input".into());
     }
-    Ok(pipeline::convert(imgs, settings))
+    let dims: Vec<(u32, u32)> = loaders.iter().map(|l| l.dims()).collect::<Result<_, _>>()?;
+    convert_streaming(&dims, |i| loaders[i].load_luma(), settings, on_progress)
+}
+
+/// Read input + run the pipeline, returning the ordered pages.
+pub fn convert_pages(path: &Path, settings: &Settings) -> Result<Vec<Page>, String> {
+    convert_pages_cb(path, settings, |_| {})
 }
 
 /// One-shot: read input, run the pipeline, return `.xtch` bytes.

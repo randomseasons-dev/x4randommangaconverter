@@ -1,7 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "./App.css";
 
 type Opts = {
@@ -41,9 +43,54 @@ export default function App() {
   const [results, setResults] = useState<ConvertResult[]>([]);
   const [previewPages, setPreviewPages] = useState<string[] | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number }>({
+    done: 0,
+    total: 0,
+  });
+  const [dragging, setDragging] = useState(false);
 
   const set = <K extends keyof Opts>(k: K, v: Opts[K]) =>
     setOpts((o) => ({ ...o, [k]: v }));
+
+  // Orientation change: default to overlapping thirds when switching to Landscape.
+  const onOrientation = (v: Opts["orientation"]) =>
+    setOpts((o) => ({
+      ...o,
+      orientation: v,
+      split: v === "landscape" ? "thirds" : o.split,
+    }));
+
+  const addPaths = useCallback(
+    (arr: string[]) => setFiles((f) => Array.from(new Set([...f, ...arr]))),
+    []
+  );
+
+  // Progress events from the backend.
+  useEffect(() => {
+    const un = listen<{ done: number; total: number }>(
+      "convert-progress",
+      (e) => setProgress(e.payload)
+    );
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
+  // Native drag-and-drop of files/folders onto the window.
+  useEffect(() => {
+    const un = getCurrentWebview().onDragDropEvent((event) => {
+      const t = event.payload.type;
+      if (t === "enter" || t === "over") setDragging(true);
+      else if (t === "leave") setDragging(false);
+      else if (t === "drop") {
+        setDragging(false);
+        if (event.payload.paths?.length) addPaths(event.payload.paths);
+      }
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [addPaths]);
 
   const splitDisabled = opts.orientation === "portrait";
 
@@ -70,6 +117,7 @@ export default function App() {
     if (files.length === 0) return;
     setBusy(true);
     setResults([]);
+    setProgress({ done: 0, total: 0 });
     try {
       const res = await invoke<ConvertResult[]>("convert", {
         paths: files,
@@ -123,15 +171,17 @@ export default function App() {
         {/* LEFT: dropzone + file list */}
         <section className="col">
           <div
-            className="dropzone"
+            className={dragging ? "dropzone dragging" : "dropzone"}
             onClick={addFiles}
             role="button"
             tabIndex={0}
           >
             <div className="arrow">↑</div>
-            <div className="dz-title">Add CBZ / CBR files</div>
+            <div className="dz-title">
+              {dragging ? "Drop to add" : "Drop or add CBZ / CBR files"}
+            </div>
             <div className="dz-sub">
-              or click to browse ·{" "}
+              drag files/folders here, or click to browse ·{" "}
               <button
                 className="linklike"
                 onClick={(e) => {
@@ -164,6 +214,26 @@ export default function App() {
               <button className="cta" disabled={busy} onClick={convert}>
                 {busy ? "CONVERTING…" : "CONVERT →"}
               </button>
+              {busy && (
+                <div className="progress">
+                  <div className="progress-bar">
+                    <div
+                      className="progress-fill"
+                      style={{
+                        width:
+                          progress.total > 0
+                            ? `${(progress.done / progress.total) * 100}%`
+                            : "0%",
+                      }}
+                    />
+                  </div>
+                  <div className="progress-text">
+                    {progress.total > 0
+                      ? `${progress.done} / ${progress.total} pages`
+                      : "Reading…"}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -187,7 +257,7 @@ export default function App() {
             <select
               value={opts.orientation}
               onChange={(e) =>
-                set("orientation", e.target.value as Opts["orientation"])
+                onOrientation(e.target.value as Opts["orientation"])
               }
             >
               <option value="portrait">Portrait</option>

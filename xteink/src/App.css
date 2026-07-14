@@ -76,6 +76,10 @@ body {
   border-color: #9a9a9a;
   background: #eee;
 }
+.dropzone.dragging {
+  border-color: #3a63c0;
+  background: #e6ecfb;
+}
 .arrow {
   font-size: 28px;
   color: var(--muted);
@@ -178,6 +182,29 @@ body {
 .cta:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* progress bar */
+.progress {
+  margin-top: 12px;
+}
+.progress-bar {
+  height: 10px;
+  background: #e2e2e2;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
+.progress-text {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
 }
 
 /* device */

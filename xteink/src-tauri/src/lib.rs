@@ -1,6 +1,15 @@
 use base64::Engine;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tauri::Emitter;
 use xtch_core::{Orientation, Settings, Split};
+
+/// Progress event payload emitted during conversion.
+#[derive(serde::Serialize, Clone)]
+struct Progress {
+    done: usize,
+    total: usize,
+}
 
 /// Settings coming from the UI.
 #[derive(serde::Deserialize, Clone)]
@@ -51,9 +60,21 @@ fn out_dir_for(path: &Path, out_dir: &Option<String>) -> PathBuf {
 /// Convert each input (cbz/zip file or image folder) to a `.xtch` saved next to it
 /// (or in `out_dir`). Runs on a blocking thread so the UI stays responsive.
 #[tauri::command]
-async fn convert(paths: Vec<String>, opts: Opts, out_dir: Option<String>) -> Vec<ConvertResult> {
+async fn convert(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    opts: Opts,
+    out_dir: Option<String>,
+) -> Vec<ConvertResult> {
     tauri::async_runtime::spawn_blocking(move || {
         let settings = opts.to_settings();
+        // grand total of source images across all inputs, for the progress bar
+        let total: usize = paths
+            .iter()
+            .map(|p| xtch_core::count_images(Path::new(p)))
+            .sum();
+        let done = AtomicUsize::new(0);
+        let _ = app.emit("convert-progress", Progress { done: 0, total });
         paths
             .iter()
             .map(|p| {
@@ -65,7 +86,11 @@ async fn convert(paths: Vec<String>, opts: Opts, out_dir: Option<String>) -> Vec
                     .to_string();
                 let name = format!("{}.xtch", stem);
                 let outp = out_dir_for(path, &out_dir).join(&name);
-                match xtch_core::convert_pages(path, &settings) {
+                let progress = |_local: usize| {
+                    let d = done.fetch_add(1, Ordering::SeqCst) + 1;
+                    let _ = app.emit("convert-progress", Progress { done: d, total });
+                };
+                match xtch_core::convert_pages_cb(path, &settings, progress) {
                     Ok(pages) => {
                         let bytes = xtch_core::encode_xtch(&pages);
                         match std::fs::write(&outp, &bytes) {
