@@ -21,7 +21,7 @@ body {
 }
 
 .app {
-  max-width: 1060px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 20px 24px 60px;
 }
@@ -48,9 +48,18 @@ body {
 
 .grid {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: minmax(0, 1fr) 340px 340px;
   gap: 24px;
   align-items: start;
+}
+@media (max-width: 1180px) {
+  /* narrow window: preview drops below, settings stay to the right of files */
+  .grid {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+  .grid > .col:last-child {
+    grid-column: 1 / -1;
+  }
 }
 .col {
   display: flex;
@@ -292,6 +301,10 @@ input[type="range"] {
 }
 
 /* live preview */
+.preview-panel {
+  position: sticky;
+  top: 20px;
+}
 .preview-box {
   display: flex;
   flex-direction: column;
@@ -310,7 +323,7 @@ input[type="range"] {
   min-height: 120px;
 }
 .preview-stage img {
-  max-height: 380px;
+  max-height: 620px;
   max-width: 100%;
   object-fit: contain;
   background: #fff;

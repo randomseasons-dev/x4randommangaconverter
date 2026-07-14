@@ -292,7 +292,7 @@ export default function App() {
           )}
         </section>
 
-        {/* RIGHT: settings */}
+        {/* MIDDLE: settings */}
         <section className="col">
           <div className="panel">
             <div className="panel-h">TARGET DEVICE</div>
@@ -374,10 +374,13 @@ export default function App() {
             <div className="slider-val">
               {(opts.min_blob_frac * 100).toFixed(1)}%
             </div>
+          </div>
+        </section>
 
-            <div className="panel-h" style={{ marginTop: 16 }}>
-              PREVIEW
-            </div>
+        {/* RIGHT: live preview */}
+        <section className="col">
+          <div className="panel preview-panel">
+            <div className="panel-h">PREVIEW</div>
             {firstFile ? (
               <div className="preview-box">
                 <div className="preview-stage">
