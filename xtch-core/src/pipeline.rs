@@ -293,6 +293,52 @@ fn dither(g: &GrayImage) -> Vec<u8> {
     buf.iter().map(|&v| v.clamp(0.0, 255.0) as u8).collect()
 }
 
+/// Public: median area of portrait-aspect images (the "common portrait").
+pub fn common_area(dims: &[(u32, u32)]) -> f64 {
+    common_portrait_area(dims)
+}
+
+fn split_count(split: Split) -> usize {
+    match split {
+        Split::None => 1,
+        Split::Half => 2,
+        Split::Thirds => 3,
+    }
+}
+
+/// How many output pages one source image yields — computed from dims + settings only
+/// (no pixel decode), so a preview can locate the source image for a given page cheaply.
+pub fn piece_count(w: u32, h: u32, common: f64, s: &Settings) -> usize {
+    match classify(w, h, common) {
+        Class::Portrait | Class::Rotated => match s.orientation {
+            Orientation::Portrait => 1,
+            Orientation::Landscape => split_count(s.split),
+        },
+        Class::Spread => match s.orientation {
+            Orientation::Portrait => 3, // F + right + left
+            Orientation::Landscape => 1 + 2 * split_count(s.split),
+        },
+    }
+}
+
+/// Convert a single source image into its ordered output pages (same logic as the
+/// streaming path, for one image). Used by the live preview.
+pub fn convert_one(img: &GrayImage, common: f64, s: &Settings) -> Vec<Page> {
+    let mut pieces = Vec::new();
+    prepare_one(img, common, s, &mut pieces);
+    pieces
+        .into_iter()
+        .map(|p| {
+            let fitted = fit(&p.img, p.tw, p.th, s.preserve_ratio);
+            Page {
+                width: p.tw as u16,
+                height: p.th as u16,
+                gray: dither(&fitted),
+            }
+        })
+        .collect()
+}
+
 /// Stream source images (loaded lazily one at a time) into ordered `.xtch` pages.
 /// `dims` are all source dimensions (cheap header reads); `load(i)` decodes image i to
 /// grayscale on demand; `on_progress(done)` is called after each source image.

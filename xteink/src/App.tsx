@@ -11,6 +11,7 @@ type Opts = {
   split: "none" | "half" | "thirds";
   preserve_ratio: boolean;
   manga_mode: boolean;
+  min_blob_frac: number; // white-border trim rate as a fraction (0.005 = 0.5%)
 };
 
 type ConvertResult = {
@@ -38,6 +39,7 @@ export default function App() {
     split: "none",
     preserve_ratio: true,
     manga_mode: true,
+    min_blob_frac: 0.005,
   });
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ConvertResult[]>([]);
@@ -48,6 +50,13 @@ export default function App() {
     total: 0,
   });
   const [dragging, setDragging] = useState(false);
+
+  // Live preview state
+  const [pvUrl, setPvUrl] = useState<string | null>(null);
+  const [pvIndex, setPvIndex] = useState(0);
+  const [pvTotal, setPvTotal] = useState(0);
+  const [pvLoading, setPvLoading] = useState(false);
+  const firstFile = files[0];
 
   const set = <K extends keyof Opts>(k: K, v: Opts[K]) =>
     setOpts((o) => ({ ...o, [k]: v }));
@@ -91,6 +100,51 @@ export default function App() {
       un.then((f) => f());
     };
   }, [addPaths]);
+
+  // Reset to first page whenever the previewed input changes.
+  useEffect(() => {
+    setPvIndex(0);
+  }, [firstFile]);
+
+  // Refresh the preview whenever the input, settings, or page index change (debounced).
+  useEffect(() => {
+    if (!firstFile) {
+      setPvUrl(null);
+      setPvTotal(0);
+      return;
+    }
+    let cancelled = false;
+    setPvLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await invoke<{ url: string; total: number; index: number }>(
+          "preview_page",
+          { path: firstFile, opts, index: pvIndex }
+        );
+        if (cancelled) return;
+        setPvUrl(res.url);
+        setPvTotal(res.total);
+        if (res.index !== pvIndex) setPvIndex(res.index);
+      } catch {
+        if (!cancelled) {
+          setPvUrl(null);
+          setPvTotal(0);
+        }
+      } finally {
+        if (!cancelled) setPvLoading(false);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [firstFile, opts, pvIndex]);
+
+  const pvNext = () => setPvIndex((i) => Math.min(i + 1, Math.max(pvTotal - 1, 0)));
+  const pvPrev = () => setPvIndex((i) => Math.max(i - 1, 0));
+  // Manga mode (RTL): left triangle advances; otherwise the right one does.
+  const onLeftTriangle = () => (opts.manga_mode ? pvNext() : pvPrev());
+  const onRightTriangle = () => (opts.manga_mode ? pvPrev() : pvNext());
 
   const splitDisabled = opts.orientation === "portrait";
 
@@ -300,6 +354,52 @@ export default function App() {
             </select>
             {splitDisabled && (
               <div className="hint">Splitting applies to Landscape only.</div>
+            )}
+          </div>
+
+          <div className="panel">
+            <label className="lbl">
+              White border trimming rate (higher value = more trimming)
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={5}
+              step={0.1}
+              value={opts.min_blob_frac * 100}
+              onChange={(e) =>
+                set("min_blob_frac", parseFloat(e.target.value) / 100)
+              }
+            />
+            <div className="slider-val">
+              {(opts.min_blob_frac * 100).toFixed(1)}%
+            </div>
+
+            <div className="panel-h" style={{ marginTop: 16 }}>
+              PREVIEW
+            </div>
+            {firstFile ? (
+              <div className="preview-box">
+                <div className="preview-stage">
+                  {pvUrl && <img src={pvUrl} alt="preview" />}
+                  {pvLoading && <div className="preview-load">updating…</div>}
+                </div>
+                <div className="preview-nav">
+                  <button className="tri" onClick={onLeftTriangle}>
+                    ◀
+                  </button>
+                  <span className="pv-count">
+                    {pvTotal > 0 ? `${pvIndex + 1} / ${pvTotal}` : "—"}
+                  </span>
+                  <button className="tri" onClick={onRightTriangle}>
+                    ▶
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="preview-empty">
+                Add a file to see a live preview of the final result.
+              </div>
             )}
           </div>
         </section>

@@ -18,6 +18,12 @@ struct Opts {
     split: String,       // "none" | "half" | "thirds"
     preserve_ratio: bool,
     manga_mode: bool,
+    #[serde(default = "default_blob")]
+    min_blob_frac: f32, // white-border trim rate (fraction of page area)
+}
+
+fn default_blob() -> f32 {
+    0.005
 }
 
 impl Opts {
@@ -35,6 +41,7 @@ impl Opts {
             },
             preserve_ratio: self.preserve_ratio,
             manga_mode: self.manga_mode,
+            min_blob_frac: self.min_blob_frac.clamp(0.0, 0.05),
             ..Default::default()
         }
     }
@@ -146,12 +153,36 @@ async fn preview(path: String, opts: Opts) -> Result<Vec<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
+#[derive(serde::Serialize)]
+struct PreviewOut {
+    url: String,
+    total: usize,
+    index: usize,
+}
+
+/// Live single-page preview for the current settings (decodes only one source image).
+#[tauri::command]
+async fn preview_page(path: String, opts: Opts, index: usize) -> Result<PreviewOut, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = opts.to_settings();
+        let (png, total, idx) = xtch_core::preview_one(Path::new(&path), &settings, index)?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        Ok(PreviewOut {
+            url: format!("data:image/png;base64,{}", b64),
+            total,
+            index: idx,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![convert, preview])
+        .invoke_handler(tauri::generate_handler![convert, preview, preview_page])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

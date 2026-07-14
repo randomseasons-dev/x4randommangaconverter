@@ -154,6 +154,99 @@ pub fn convert_input(path: &Path, settings: &Settings) -> Result<Vec<u8>, String
     Ok(encode_xtch(&convert_pages(path, settings)?))
 }
 
+/// Find (source_index, local_page) for a global page index given per-image counts.
+fn locate(counts: &[usize], idx: usize) -> (usize, usize) {
+    let mut acc = 0usize;
+    for (i, &c) in counts.iter().enumerate() {
+        if idx < acc + c {
+            return (i, idx - acc);
+        }
+        acc += c;
+    }
+    (counts.len().saturating_sub(1), 0)
+}
+
+/// Cheaply read image dimensions from (a prefix of) compressed bytes.
+fn dims_from_bytes(b: &[u8]) -> Result<(u32, u32), String> {
+    image::ImageReader::new(Cursor::new(b))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?
+        .into_dimensions()
+        .map_err(|e| e.to_string())
+}
+
+/// Live-preview a single output page for the given settings, decoding only the one
+/// source image that produces it. Returns (PNG bytes, total pages, clamped index).
+pub fn preview_one(
+    path: &Path,
+    settings: &Settings,
+    index: usize,
+) -> Result<(Vec<u8>, usize, usize), String> {
+    // Collect all source dims cheaply, and keep a way to load the chosen image.
+    let (dims, load): (Vec<(u32, u32)>, Box<dyn Fn(usize) -> Result<GrayImage, String>>) =
+        if path.is_dir() {
+            let loaders = list_folder(path)?;
+            if loaders.is_empty() {
+                return Err("no images found in input".into());
+            }
+            let dims = loaders.iter().map(|l| l.dims()).collect::<Result<_, _>>()?;
+            (dims, Box::new(move |i| loaders[i].load_luma()))
+        } else {
+            // CBZ: read a bounded prefix per entry for dims; full-read only the target.
+            let path = path.to_path_buf();
+            let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+            let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+            let mut names: Vec<String> = (0..zip.len())
+                .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string()))
+                .filter(|n| is_image_name(n))
+                .collect();
+            names.sort();
+            if names.is_empty() {
+                return Err("no images found in input".into());
+            }
+            let mut dims = Vec::with_capacity(names.len());
+            for n in &names {
+                let mut f = zip.by_name(n).map_err(|e| e.to_string())?;
+                let mut prefix = Vec::new();
+                std::io::Read::take(&mut f, 256 * 1024)
+                    .read_to_end(&mut prefix)
+                    .map_err(|e| e.to_string())?;
+                dims.push(dims_from_bytes(&prefix)?);
+            }
+            let names2 = names.clone();
+            (
+                dims,
+                Box::new(move |i| {
+                    let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+                    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+                    let mut f = zip.by_name(&names2[i]).map_err(|e| e.to_string())?;
+                    let mut bytes = Vec::new();
+                    f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+                    image::load_from_memory(&bytes)
+                        .map(|im| im.to_luma8())
+                        .map_err(|e| e.to_string())
+                }),
+            )
+        };
+
+    let common = pipeline::common_area(&dims);
+    let counts: Vec<usize> = dims
+        .iter()
+        .map(|(w, h)| pipeline::piece_count(*w, *h, common, settings))
+        .collect();
+    let total: usize = counts.iter().sum();
+    if total == 0 {
+        return Err("input produced no pages".into());
+    }
+    let idx = index.min(total - 1);
+    let (si, lj) = locate(&counts, idx);
+    let img = load(si)?;
+    let pages = pipeline::convert_one(&img, common, settings);
+    let lj = lj.min(pages.len().saturating_sub(1));
+    let png = page_to_png(&pages[lj])?;
+    Ok((png, total, idx))
+}
+
 /// Render a page to PNG bytes (for UI preview).
 pub fn page_to_png(p: &Page) -> Result<Vec<u8>, String> {
     let img = image::GrayImage::from_raw(p.width as u32, p.height as u32, p.gray.clone())
