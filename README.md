@@ -1,3 +1,7 @@
+# Ver 1.3 changelog:
+- Added Contrast slider. Preview panel updates in real time.
+- Added split output file size (for picture folders drop in).
+
 # Ver 1.2 changelog:
 - Added preview panel.
 - Added white border adjustment rate bar. 
