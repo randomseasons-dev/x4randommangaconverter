@@ -65,11 +65,27 @@ pub fn encode_page(p: &Page) -> Vec<u8> {
     out
 }
 
-/// Assemble the full `.xtch` container from ordered pages.
-pub fn encode_xtch(pages: &[Page]) -> Vec<u8> {
-    let n = pages.len();
-    let bodies: Vec<Vec<u8>> = pages.iter().map(encode_page).collect();
+/// A page already encoded to its `.xtch` block bytes (+ its dimensions).
+/// Lets us pack pages incrementally (e.g. size-based file splitting) without
+/// holding all the 8-bit `Page` buffers in memory.
+pub struct EncodedPage {
+    pub width: u16,
+    pub height: u16,
+    pub data: Vec<u8>,
+}
 
+/// Encode a page to its block form.
+pub fn encoded_page(p: &Page) -> EncodedPage {
+    EncodedPage {
+        width: p.width,
+        height: p.height,
+        data: encode_page(p),
+    }
+}
+
+/// Assemble a full `.xtch` container from already-encoded page blocks.
+pub fn assemble(pages: &[EncodedPage]) -> Vec<u8> {
+    let n = pages.len();
     let mut header = vec![0u8; 48];
     header[0..4].copy_from_slice(b"XTCH");
     header[4..6].copy_from_slice(&1u16.to_le_bytes()); // version
@@ -80,18 +96,29 @@ pub fn encode_xtch(pages: &[Page]) -> Vec<u8> {
 
     let mut dir = Vec::with_capacity(16 * n);
     let mut cur = data_off;
-    for (i, b) in bodies.iter().enumerate() {
+    for p in pages {
         dir.extend_from_slice(&(cur as u64).to_le_bytes()); // offset
-        dir.extend_from_slice(&(b.len() as u32).to_le_bytes()); // size (full block)
-        dir.extend_from_slice(&pages[i].width.to_le_bytes());
-        dir.extend_from_slice(&pages[i].height.to_le_bytes());
-        cur += b.len();
+        dir.extend_from_slice(&(p.data.len() as u32).to_le_bytes()); // size (full block)
+        dir.extend_from_slice(&p.width.to_le_bytes());
+        dir.extend_from_slice(&p.height.to_le_bytes());
+        cur += p.data.len();
     }
 
     let mut out = header;
     out.extend_from_slice(&dir);
-    for b in bodies {
-        out.extend_from_slice(&b);
+    for p in pages {
+        out.extend_from_slice(&p.data);
     }
     out
+}
+
+/// Assemble the full `.xtch` container from ordered pages.
+pub fn encode_xtch(pages: &[Page]) -> Vec<u8> {
+    let enc: Vec<EncodedPage> = pages.iter().map(encoded_page).collect();
+    assemble(&enc)
+}
+
+/// Byte size of a container holding `n` page blocks of the given total block bytes.
+pub fn container_size(n: usize, total_block_bytes: usize) -> usize {
+    48 + 16 * n + total_block_bytes
 }

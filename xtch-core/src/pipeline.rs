@@ -32,6 +32,8 @@ pub struct Settings {
     pub white_thresh: u8,
     /// Drop connected components smaller than this fraction of page area. Default 0.001 (0.1%).
     pub min_blob_frac: f32,
+    /// Contrast adjustment applied before dithering, in [-100, 100]. 0 = no change.
+    pub contrast: f32,
 }
 
 impl Default for Settings {
@@ -43,6 +45,7 @@ impl Default for Settings {
             manga_mode: true,
             white_thresh: 245,
             min_blob_frac: 0.001,
+            contrast: 0.0,
         }
     }
 }
@@ -263,6 +266,21 @@ fn fit(g: &GrayImage, tw: u32, th: u32, preserve_ratio: bool) -> GrayImage {
     canvas
 }
 
+/// Apply a contrast adjustment (GIMP-style) around mid-gray. `c` in [-100, 100].
+fn apply_contrast(g: &mut GrayImage, c: f32) {
+    if c == 0.0 {
+        return;
+    }
+    let c = c.clamp(-100.0, 100.0);
+    let factor = (259.0 * (c + 255.0)) / (255.0 * (259.0 - c));
+    let lut: Vec<u8> = (0..256)
+        .map(|v| ((v as f32 - 128.0) * factor + 128.0).clamp(0.0, 255.0) as u8)
+        .collect();
+    for p in g.pixels_mut() {
+        p.0[0] = lut[p.0[0] as usize];
+    }
+}
+
 /// Floyd–Steinberg dither to the 4 device gray levels {0,85,170,255}.
 fn dither(g: &GrayImage) -> Vec<u8> {
     let (w, h) = (g.width() as usize, g.height() as usize);
@@ -321,53 +339,75 @@ pub fn piece_count(w: u32, h: u32, common: f64, s: &Settings) -> usize {
     }
 }
 
+/// Finish one prepared piece into a packed-ready `Page` (fit -> contrast -> dither).
+fn piece_to_page(p: Piece, s: &Settings) -> Page {
+    let mut fitted = fit(&p.img, p.tw, p.th, s.preserve_ratio);
+    apply_contrast(&mut fitted, s.contrast);
+    Page {
+        width: p.tw as u16,
+        height: p.th as u16,
+        gray: dither(&fitted),
+    }
+}
+
 /// Convert a single source image into its ordered output pages (same logic as the
 /// streaming path, for one image). Used by the live preview.
 pub fn convert_one(img: &GrayImage, common: f64, s: &Settings) -> Vec<Page> {
     let mut pieces = Vec::new();
     prepare_one(img, common, s, &mut pieces);
-    pieces
-        .into_iter()
-        .map(|p| {
-            let fitted = fit(&p.img, p.tw, p.th, s.preserve_ratio);
-            Page {
-                width: p.tw as u16,
-                height: p.th as u16,
-                gray: dither(&fitted),
-            }
-        })
-        .collect()
+    pieces.into_iter().map(|p| piece_to_page(p, s)).collect()
 }
 
-/// Stream source images (loaded lazily one at a time) into ordered `.xtch` pages.
-/// `dims` are all source dimensions (cheap header reads); `load(i)` decodes image i to
-/// grayscale on demand; `on_progress(done)` is called after each source image.
-pub fn convert_streaming<L, P>(
+/// Stream source images one at a time, invoking `on_page` for each produced page
+/// (so callers can pack incrementally, e.g. size-based file splitting) without
+/// holding every page in memory. `on_progress(done)` fires after each source image.
+pub fn convert_pages_stream<L, F, P>(
     dims: &[(u32, u32)],
     load: L,
     s: &Settings,
+    mut on_page: F,
     mut on_progress: P,
-) -> Result<Vec<Page>, String>
+) -> Result<(), String>
 where
     L: Fn(usize) -> Result<GrayImage, String>,
+    F: FnMut(Page) -> Result<(), String>,
     P: FnMut(usize),
 {
     let common = common_portrait_area(dims);
-    let mut pages = Vec::new();
     for i in 0..dims.len() {
         let img = load(i)?;
         let mut pieces = Vec::new();
         prepare_one(&img, common, s, &mut pieces);
         drop(img);
         for p in pieces {
-            let fitted = fit(&p.img, p.tw, p.th, s.preserve_ratio);
-            pages.push(Page {
-                width: p.tw as u16,
-                height: p.th as u16,
-                gray: dither(&fitted),
-            });
+            on_page(piece_to_page(p, s))?;
         }
         on_progress(i + 1);
     }
+    Ok(())
+}
+
+/// Collecting variant of [`convert_pages_stream`] — returns all pages in order.
+pub fn convert_streaming<L, P>(
+    dims: &[(u32, u32)],
+    load: L,
+    s: &Settings,
+    on_progress: P,
+) -> Result<Vec<Page>, String>
+where
+    L: Fn(usize) -> Result<GrayImage, String>,
+    P: FnMut(usize),
+{
+    let mut pages = Vec::new();
+    convert_pages_stream(
+        dims,
+        load,
+        s,
+        |pg| {
+            pages.push(pg);
+            Ok(())
+        },
+        on_progress,
+    )?;
     Ok(pages)
 }

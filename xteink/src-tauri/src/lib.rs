@@ -20,6 +20,10 @@ struct Opts {
     manga_mode: bool,
     #[serde(default = "default_blob")]
     min_blob_frac: f32, // white-border trim rate (fraction of page area)
+    #[serde(default)]
+    contrast: f32, // -100..100, 0 = none
+    #[serde(default)]
+    split_mb: Option<u32>, // split output into files of <= N MB (folders only)
 }
 
 fn default_blob() -> f32 {
@@ -42,6 +46,7 @@ impl Opts {
             preserve_ratio: self.preserve_ratio,
             manga_mode: self.manga_mode,
             min_blob_frac: self.min_blob_frac.clamp(0.0, 0.05),
+            contrast: self.contrast.clamp(-100.0, 100.0),
             ..Default::default()
         }
     }
@@ -52,6 +57,7 @@ struct ConvertResult {
     name: String,
     ok: bool,
     pages: usize,
+    files: usize,
     size: u64,
     out_path: String,
     error: Option<String>,
@@ -61,6 +67,113 @@ fn out_dir_for(path: &Path, out_dir: &Option<String>) -> PathBuf {
     match out_dir {
         Some(d) if !d.is_empty() => PathBuf::from(d),
         _ => path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+    }
+}
+
+/// Convert one input, streaming pages and (for folders, when `split_mb` is set)
+/// writing multiple `.xtch` files each <= `split_mb` MB. Single file otherwise.
+fn convert_one_input(
+    path: &Path,
+    settings: &Settings,
+    out_dir: &Option<String>,
+    split_mb: Option<u32>,
+    on_progress: impl FnMut(usize),
+) -> ConvertResult {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output")
+        .to_string();
+    let name = format!("{}.xtch", stem);
+    let dir = out_dir_for(path, out_dir);
+    // Size-splitting applies only to image folders.
+    let limit_bytes: Option<usize> = if path.is_dir() {
+        split_mb
+            .filter(|&mb| mb >= 10)
+            .map(|mb| (mb as usize) * 1024 * 1024)
+    } else {
+        None
+    };
+
+    let mut parts: Vec<xtch_core::EncodedPage> = Vec::new();
+    let mut part_bytes: usize = 48; // container header
+    let mut part_index: usize = 0; // number of parts already flushed mid-stream
+    let mut total_pages: usize = 0;
+    let mut total_size: u64 = 0;
+    let mut written: Vec<PathBuf> = Vec::new();
+
+    let res = xtch_core::convert_stream(
+        path,
+        settings,
+        |page| {
+            let ep = xtch_core::encoded_page(&page);
+            let add = 16 + ep.data.len(); // dir entry + block
+            if let Some(limit) = limit_bytes {
+                if !parts.is_empty() && part_bytes + add > limit {
+                    part_index += 1;
+                    let outp = dir.join(format!("{}_{}.xtch", stem, part_index));
+                    let bytes = xtch_core::assemble(&parts);
+                    std::fs::write(&outp, &bytes).map_err(|e| e.to_string())?;
+                    total_size += bytes.len() as u64;
+                    written.push(outp);
+                    parts.clear();
+                    part_bytes = 48;
+                }
+            }
+            parts.push(ep);
+            part_bytes += add;
+            total_pages += 1;
+            Ok(())
+        },
+        on_progress,
+    );
+
+    if let Err(e) = res {
+        return ConvertResult {
+            name,
+            ok: false,
+            pages: 0,
+            files: 0,
+            size: 0,
+            out_path: String::new(),
+            error: Some(e),
+        };
+    }
+
+    // Flush the final (or only) part.
+    if !parts.is_empty() {
+        let outp = if part_index == 0 {
+            dir.join(&name) // single file
+        } else {
+            dir.join(format!("{}_{}.xtch", stem, part_index + 1))
+        };
+        let bytes = xtch_core::assemble(&parts);
+        if let Err(e) = std::fs::write(&outp, &bytes) {
+            return ConvertResult {
+                name,
+                ok: false,
+                pages: 0,
+                files: 0,
+                size: 0,
+                out_path: String::new(),
+                error: Some(e.to_string()),
+            };
+        }
+        total_size += bytes.len() as u64;
+        written.push(outp);
+    }
+
+    ConvertResult {
+        name,
+        ok: true,
+        pages: total_pages,
+        files: written.len(),
+        size: total_size,
+        out_path: written
+            .first()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+        error: None,
     }
 }
 
@@ -86,48 +199,11 @@ async fn convert(
             .iter()
             .map(|p| {
                 let path = Path::new(p);
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("output")
-                    .to_string();
-                let name = format!("{}.xtch", stem);
-                let outp = out_dir_for(path, &out_dir).join(&name);
                 let progress = |_local: usize| {
                     let d = done.fetch_add(1, Ordering::SeqCst) + 1;
                     let _ = app.emit("convert-progress", Progress { done: d, total });
                 };
-                match xtch_core::convert_pages_cb(path, &settings, progress) {
-                    Ok(pages) => {
-                        let bytes = xtch_core::encode_xtch(&pages);
-                        match std::fs::write(&outp, &bytes) {
-                            Ok(_) => ConvertResult {
-                                name,
-                                ok: true,
-                                pages: pages.len(),
-                                size: bytes.len() as u64,
-                                out_path: outp.display().to_string(),
-                                error: None,
-                            },
-                            Err(e) => ConvertResult {
-                                name,
-                                ok: false,
-                                pages: 0,
-                                size: 0,
-                                out_path: String::new(),
-                                error: Some(e.to_string()),
-                            },
-                        }
-                    }
-                    Err(e) => ConvertResult {
-                        name,
-                        ok: false,
-                        pages: 0,
-                        size: 0,
-                        out_path: String::new(),
-                        error: Some(e),
-                    },
-                }
+                convert_one_input(path, &settings, &out_dir, opts.split_mb, progress)
             })
             .collect()
     })

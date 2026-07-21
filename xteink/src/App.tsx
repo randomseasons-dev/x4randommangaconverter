@@ -12,12 +12,15 @@ type Opts = {
   preserve_ratio: boolean;
   manga_mode: boolean;
   min_blob_frac: number; // white-border trim rate as a fraction (0.005 = 0.5%)
+  contrast: number; // -100..100, 0 = none
+  split_mb: number | null; // split output into <= N MB files (folders only); null = off
 };
 
 type ConvertResult = {
   name: string;
   ok: boolean;
   pages: number;
+  files: number;
   size: number;
   out_path: string;
   error: string | null;
@@ -40,6 +43,8 @@ export default function App() {
     preserve_ratio: true,
     manga_mode: true,
     min_blob_frac: 0.005,
+    contrast: 0,
+    split_mb: null,
   });
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ConvertResult[]>([]);
@@ -185,6 +190,7 @@ export default function App() {
           name: "error",
           ok: false,
           pages: 0,
+          files: 0,
           size: 0,
           out_path: "",
           error: String(e),
@@ -374,6 +380,42 @@ export default function App() {
             <div className="slider-val">
               {(opts.min_blob_frac * 100).toFixed(1)}%
             </div>
+
+            <label className="lbl" style={{ marginTop: 16 }}>
+              Contrast
+            </label>
+            <input
+              type="range"
+              min={-100}
+              max={100}
+              step={1}
+              value={opts.contrast}
+              onChange={(e) => set("contrast", parseInt(e.target.value, 10))}
+            />
+            <div className="slider-val">
+              {opts.contrast > 0 ? `+${opts.contrast}` : opts.contrast}
+            </div>
+          </div>
+
+          <div className="panel">
+            <label className="lbl">Split output files (MB per file)</label>
+            <input
+              type="number"
+              className="numbox"
+              min={10}
+              max={500}
+              placeholder="off"
+              value={opts.split_mb ?? ""}
+              onChange={(e) => {
+                const v = e.target.value.trim();
+                if (v === "") return set("split_mb", null);
+                const n = Math.min(500, Math.max(10, Math.round(Number(v) || 0)));
+                set("split_mb", n);
+              }}
+            />
+            <div className="hint">
+              Folders only · 10–500 MB per file · blank = one file.
+            </div>
           </div>
         </section>
 
@@ -419,7 +461,9 @@ export default function App() {
                   <div className="r-name">{r.name}</div>
                   {r.ok ? (
                     <div className="r-meta">
-                      {r.pages} pages · {fmtSize(r.size)}
+                      {r.pages} pages ·{" "}
+                      {r.files > 1 ? `${r.files} files · ` : ""}
+                      {fmtSize(r.size)}
                     </div>
                   ) : (
                     <div className="r-meta err-text">{r.error}</div>

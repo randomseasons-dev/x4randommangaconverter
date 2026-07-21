@@ -3,8 +3,8 @@
 pub mod pipeline;
 pub mod xtch;
 
-pub use pipeline::{convert_streaming, Orientation, Settings, Split};
-pub use xtch::{encode_xtch, Page};
+pub use pipeline::{convert_pages_stream, convert_streaming, Orientation, Settings, Split};
+pub use xtch::{assemble, encode_xtch, encoded_page, EncodedPage, Page};
 
 use image::GrayImage;
 use std::io::{Cursor, Read};
@@ -147,6 +147,22 @@ pub fn convert_pages_cb(
 /// Read input + run the pipeline, returning the ordered pages.
 pub fn convert_pages(path: &Path, settings: &Settings) -> Result<Vec<Page>, String> {
     convert_pages_cb(path, settings, |_| {})
+}
+
+/// Read input + stream each produced page to `on_page` (for incremental packing /
+/// size-based file splitting). `on_progress(done)` fires per source image.
+pub fn convert_stream(
+    path: &Path,
+    settings: &Settings,
+    on_page: impl FnMut(Page) -> Result<(), String>,
+    on_progress: impl FnMut(usize),
+) -> Result<(), String> {
+    let loaders = list_input(path)?;
+    if loaders.is_empty() {
+        return Err("no images found in input".into());
+    }
+    let dims: Vec<(u32, u32)> = loaders.iter().map(|l| l.dims()).collect::<Result<_, _>>()?;
+    convert_pages_stream(&dims, |i| loaders[i].load_luma(), settings, on_page, on_progress)
 }
 
 /// One-shot: read input, run the pipeline, return `.xtch` bytes.

@@ -299,6 +299,14 @@ input[type="range"] {
   color: var(--muted);
   margin-top: 4px;
 }
+.numbox {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #fff;
+  font: inherit;
+}
 
 /* live preview */
 .preview-panel {
