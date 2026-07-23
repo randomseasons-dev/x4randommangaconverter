@@ -1,6 +1,6 @@
 # Ver 1.3.1 changelog:
 - Target device is now a dropdown (X3 and future devices to come).
-- Renamed the white-border setting to "trimming aggression"; default is now 0.4%.
+- White-border trimming default is now reduced to 0.4%.
 - Split-size box now accepts free number entry (bounds are checked, not auto-adjusted).
 - Compacted the settings column so it takes less vertical space.
 - Minor label wording fixes.
