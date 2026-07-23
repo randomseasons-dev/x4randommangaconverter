@@ -1,3 +1,10 @@
+# Ver 1.3.1 changelog:
+- Target device is now a dropdown (X3 and future devices to come).
+- Renamed the white-border setting to "trimming aggression"; default is now 0.4%.
+- Split-size box now accepts free number entry (bounds are checked, not auto-adjusted).
+- Compacted the settings column so it takes less vertical space.
+- Minor label wording fixes.
+
 # Ver 1.3 changelog:
 - Added Contrast slider. Preview panel updates in real time.
 - Added split output file size (for picture folders drop in).
@@ -10,7 +17,6 @@
 # Future features:
 - Customizable double-page display. Currently fixed: full page then split. 
 - Customizable dithering method. 
-- Customizable contrast and other rendering features. 
 - Other ideas. 
 
 # XTEink Manga Creator

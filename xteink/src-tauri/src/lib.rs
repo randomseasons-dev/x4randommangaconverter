@@ -27,7 +27,7 @@ struct Opts {
 }
 
 fn default_blob() -> f32 {
-    0.005
+    0.004
 }
 
 impl Opts {
@@ -89,7 +89,7 @@ fn convert_one_input(
     // Size-splitting applies only to image folders.
     let limit_bytes: Option<usize> = if path.is_dir() {
         split_mb
-            .filter(|&mb| mb >= 10)
+            .filter(|&mb| (10..=500).contains(&mb))
             .map(|mb| (mb as usize) * 1024 * 1024)
     } else {
         None

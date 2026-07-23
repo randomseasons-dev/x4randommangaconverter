@@ -11,9 +11,8 @@ type Opts = {
   split: "none" | "half" | "thirds";
   preserve_ratio: boolean;
   manga_mode: boolean;
-  min_blob_frac: number; // white-border trim rate as a fraction (0.005 = 0.5%)
+  min_blob_frac: number; // white-border trim aggression as a fraction (0.004 = 0.4%)
   contrast: number; // -100..100, 0 = none
-  split_mb: number | null; // split output into <= N MB files (folders only); null = off
 };
 
 type ConvertResult = {
@@ -42,10 +41,10 @@ export default function App() {
     split: "none",
     preserve_ratio: true,
     manga_mode: true,
-    min_blob_frac: 0.005,
+    min_blob_frac: 0.004,
     contrast: 0,
-    split_mb: null,
   });
+  const [splitText, setSplitText] = useState("");
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<ConvertResult[]>([]);
   const [previewPages, setPreviewPages] = useState<string[] | null>(null);
@@ -178,9 +177,13 @@ export default function App() {
     setResults([]);
     setProgress({ done: 0, total: 0 });
     try {
+      // Split size: use only if a valid in-bounds number was typed; else no split.
+      const n = parseInt(splitText, 10);
+      const split_mb =
+        Number.isFinite(n) && n >= 10 && n <= 500 ? n : null;
       const res = await invoke<ConvertResult[]>("convert", {
         paths: files,
-        opts,
+        opts: { ...opts, split_mb },
         outDir: null,
       });
       setResults(res);
@@ -199,7 +202,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [files, opts]);
+  }, [files, opts, splitText]);
 
   const doPreview = useCallback(
     async (path: string) => {
@@ -302,12 +305,12 @@ export default function App() {
         <section className="col">
           <div className="panel">
             <div className="panel-h">TARGET DEVICE</div>
-            <div className="devrow">
-              <button className="dev active">[X4]</button>
-              <button className="dev" disabled title="X3 not supported yet">
-                [X3]
-              </button>
-            </div>
+            <select value="x4" onChange={() => {}}>
+              <option value="x4">XTEink X4 (480×800)</option>
+              <option value="x3" disabled>
+                XTEink X3 — coming soon
+              </option>
+            </select>
           </div>
 
           <div className="panel">
@@ -339,7 +342,7 @@ export default function App() {
                 checked={opts.preserve_ratio}
                 onChange={(e) => set("preserve_ratio", e.target.checked)}
               />
-              <span>Preserve picture ratio (white-pad, no stretch)</span>
+              <span>Preserve picture ratio (no stretched corners)</span>
             </label>
 
             <div className="fixedinfo">
@@ -364,9 +367,7 @@ export default function App() {
           </div>
 
           <div className="panel">
-            <label className="lbl">
-              White border trimming rate (higher value = more trimming)
-            </label>
+            <label className="lbl">White border trimming aggression</label>
             <input
               type="range"
               min={0}
@@ -381,7 +382,7 @@ export default function App() {
               {(opts.min_blob_frac * 100).toFixed(1)}%
             </div>
 
-            <label className="lbl" style={{ marginTop: 16 }}>
+            <label className="lbl" style={{ marginTop: 10 }}>
               Contrast
             </label>
             <input
@@ -400,22 +401,26 @@ export default function App() {
           <div className="panel">
             <label className="lbl">Split output files (MB per file)</label>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               className="numbox"
-              min={10}
-              max={500}
               placeholder="off"
-              value={opts.split_mb ?? ""}
-              onChange={(e) => {
-                const v = e.target.value.trim();
-                if (v === "") return set("split_mb", null);
-                const n = Math.min(500, Math.max(10, Math.round(Number(v) || 0)));
-                set("split_mb", n);
-              }}
+              value={splitText}
+              onChange={(e) => setSplitText(e.target.value)}
             />
-            <div className="hint">
-              Folders only · 10–500 MB per file · blank = one file.
-            </div>
+            {(() => {
+              const n = parseInt(splitText, 10);
+              const bad =
+                splitText.trim() !== "" &&
+                (!Number.isFinite(n) || n < 10 || n > 500);
+              return (
+                <div className={bad ? "hint hint-bad" : "hint"}>
+                  {bad
+                    ? "Enter a number from 10 to 500 (or leave blank)."
+                    : "Folders only · 10–500 MB per file · blank = one file."}
+                </div>
+              );
+            })()}
           </div>
         </section>
 
