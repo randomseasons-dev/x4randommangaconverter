@@ -1,5 +1,5 @@
 # Ver 1.6.0 changelog:
-- New **Wallpapers creator** tab: turn pictures (JPG / PNG / WEBP / BMP / GIF, or picture folders) into wallpapers for your device — 24-bit BMP (the device requires this format) at the exact screen size, always portrait.
+- New **Wallpapers creator** tab added: turn pictures (JPG / PNG / WEBP / BMP / GIF, or picture folders) into wallpapers for your device — 24-bit BMP (the device requires this format) at the exact screen size, always portrait.
 - Settings: Preserve pictures ratio · Resized To Fill Screen (recommended) · Black Border (unticked = white) · 4 gray levels dithering (highly recommended) · output as zip file.
 - Output: `<name>_screen.bmp` in an `xteink screens` subfolder, or one zip (`xteink screens.zip` / `<folder>_screens.zip`).
 - Phone photos are auto-rotated (EXIF); transparent pictures are flattened onto white.
