@@ -1,9 +1,10 @@
 # Ver 1.5.0 changelog:
-- App renamed to **xteink all-in-one converter** (window, exe and installers).
-- New tabs at the top: "Manga converter" (current tool) + two "coming soon..." slots for future tools.
-- Device dropdown now drives the whole conversion: **XTEink X4** (480×800), **XTEink X4 Pro** (480×800) and **XTEink X3** (528×792).
-- New drop-box wording; click "browse" to pick CBZ / CBR files or a picture folder.
-- Preview arrows: next page = green, previous page = red (follows Manga mode).
+- Renamed to xteink all-in-one converter (window, exe and installers) as more features will be added and separated in tabs. Currently the Manga Converter feature has been completed and is the default tab.
+- X4 Pro and X3 devices are added with fully functional features.
+- Text changes for easier reading.
+- Preview arrows now have better guiding color: next page = green, previous page = red (because of Manga mode's reversed reading direction).
+- Includes v1.4.0: ~2.7× faster parallel conversion, no more slow-down on long batches.
+- X4 Pro: .xtch files need CrossPoint Reader firmware v1.6.0 or newer (avoid the first 1.6.0 build).
 
 # Ver 1.4.0 changelog:
 - Much faster conversion: pages are processed in parallel on all CPU cores (~2.7× faster).
