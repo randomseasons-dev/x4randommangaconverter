@@ -1,5 +1,6 @@
 # Ver 1.5.0 changelog:
 - Renamed to xteink all-in-one converter (window, exe and installers) as more features will be added and separated in tabs. Currently the Manga Converter feature has been completed and is the default tab.
+- Manga converter feature: drop cbz files or simply the picture folder, the app will crop, trim, resize, convert....ect based on your settings. Output will be .xtch files which your xteink devices can read to display pictures. 
 - X4 Pro and X3 devices are added with fully functional features.
 - Text changes for easier reading.
 - Preview arrows now have better guiding color: next page = green, previous page = red (because of Manga mode's reversed reading direction).
