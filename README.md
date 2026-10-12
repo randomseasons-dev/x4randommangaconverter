@@ -7,6 +7,8 @@
 - Includes v1.4.0: ~2.7× faster parallel conversion, no more slow-down on long batches.
 - X4 Pro: .xtch files need CrossPoint Reader firmware v1.6.0 or newer (avoid the first 1.6.0 build).
 
+IMPORTANT: I made this app because unique features like cropping to overlapping 3rds or 4th-gray level dithering color conversion are needed for reading manga on this device, which I never saw a true offline app can do, only online. Anyway this is just a niche feature for hardcore manga fans, don't be disappointed if you find reading manga on xteink devices hard and uncomfortable, use devices with bigger screens if you have.
+
 # Ver 1.4.0 changelog:
 - Much faster conversion: pages are processed in parallel on all CPU cores (~2.7× faster).
 - Fixed conversion getting slower over time on long batches (new memory allocator).
