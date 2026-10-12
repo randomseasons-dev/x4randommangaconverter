@@ -1,8 +1,13 @@
 use base64::Engine;
 use std::path::{Path, PathBuf};
+
+// Faster allocator: big speedup under heavy alloc churn, and — unlike the default
+// Windows allocator — it doesn't degrade as the heap grows (fixes slowdown-over-time).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::Emitter;
-use xtch_core::{Orientation, Settings, Split};
+use xtch_core::{Device, Orientation, Settings, Split};
 
 /// Progress event payload emitted during conversion.
 #[derive(serde::Serialize, Clone)]
@@ -14,6 +19,8 @@ struct Progress {
 /// Settings coming from the UI.
 #[derive(serde::Deserialize, Clone)]
 struct Opts {
+    #[serde(default = "default_device")]
+    device: String, // "x4" | "x4pro" | "x3"
     orientation: String, // "portrait" | "landscape"
     split: String,       // "none" | "half" | "thirds"
     preserve_ratio: bool,
@@ -26,6 +33,10 @@ struct Opts {
     split_mb: Option<u32>, // split output into files of <= N MB (folders only)
 }
 
+fn default_device() -> String {
+    "x4".into()
+}
+
 fn default_blob() -> f32 {
     0.004
 }
@@ -33,6 +44,11 @@ fn default_blob() -> f32 {
 impl Opts {
     fn to_settings(&self) -> Settings {
         Settings {
+            device: match self.device.as_str() {
+                "x4pro" => Device::X4Pro,
+                "x3" => Device::X3,
+                _ => Device::X4,
+            },
             orientation: if self.orientation == "landscape" {
                 Orientation::Landscape
             } else {
@@ -102,7 +118,7 @@ fn convert_one_input(
     let mut total_size: u64 = 0;
     let mut written: Vec<PathBuf> = Vec::new();
 
-    let res = xtch_core::convert_stream(
+    let res = xtch_core::convert_stream_par(
         path,
         settings,
         |page| {
@@ -201,7 +217,10 @@ async fn convert(
                 let path = Path::new(p);
                 let progress = |_local: usize| {
                     let d = done.fetch_add(1, Ordering::SeqCst) + 1;
-                    let _ = app.emit("convert-progress", Progress { done: d, total });
+                    // Throttle IPC/UI churn: emit ~1 in 8 (and always the last page).
+                    if d % 8 == 0 || d == total {
+                        let _ = app.emit("convert-progress", Progress { done: d, total });
+                    }
                 };
                 convert_one_input(path, &settings, &out_dir, opts.split_mb, progress)
             })

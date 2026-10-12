@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "xteink",
-  "version": "1.3.1",
+  "productName": "xteink all-in-one converter",
+  "mainBinaryName": "xteink all-in-one converter",
+  "version": "1.5.0",
   "identifier": "app.xteink.mangacreator",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "xteink",
+        "title": "xteink all-in-one converter",
         "width": 800,
         "height": 600
       }

@@ -21,8 +21,35 @@ pub enum Split {
     Thirds,
 }
 
+/// Target reader. Each device's profile (screen size) drives every page-size decision
+/// in the pipeline; add a new device by adding a variant + its row in `portrait()`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Device {
+    X4,
+    X4Pro,
+    X3,
+}
+
+impl Device {
+    /// Portrait page canvas (width, height) in pixels.
+    pub fn portrait(self) -> (u32, u32) {
+        match self {
+            Device::X4 => (480, 800),    // 4.3", 800x480 panel
+            Device::X4Pro => (480, 800), // 4.3", same 800x480 resolution as the X4
+            Device::X3 => (528, 792),    // 3.7", 792x528 panel
+        }
+    }
+
+    /// Landscape page canvas = the portrait canvas turned sideways.
+    pub fn landscape(self) -> (u32, u32) {
+        let (w, h) = self.portrait();
+        (h, w)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Settings {
+    pub device: Device,
     pub orientation: Orientation,
     pub split: Split,
     pub preserve_ratio: bool,
@@ -39,6 +66,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            device: Device::X4,
             orientation: Orientation::Portrait,
             split: Split::None,
             preserve_ratio: true,
@@ -50,8 +78,6 @@ impl Default for Settings {
     }
 }
 
-const PORTRAIT: (u32, u32) = (480, 800);
-const LANDSCAPE: (u32, u32) = (800, 480);
 const ASPECT_MIN: f32 = 1.15; // decisive aspect ratio
 const SPREAD_AREA_MULT: f32 = 1.5; // >= this * common portrait area => spread
 
@@ -109,22 +135,24 @@ fn rotate_cw(img: &GrayImage) -> GrayImage {
     image::imageops::rotate90(img)
 }
 
-/// Split a page (landscape output) into pieces per the split setting, all targeting LANDSCAPE.
-fn landscape_pieces(img: &GrayImage, split: Split, out: &mut Vec<Piece>) {
+/// Split a page (landscape output) into pieces per the split setting, all targeting
+/// the device's landscape canvas.
+fn landscape_pieces(img: &GrayImage, s: &Settings, out: &mut Vec<Piece>) {
+    let (lw, lh) = s.device.landscape();
     let h = img.height() as f32;
-    match split {
+    match s.split {
         Split::None => out.push(Piece {
             img: img.clone(),
-            tw: LANDSCAPE.0,
-            th: LANDSCAPE.1,
+            tw: lw,
+            th: lh,
         }),
         Split::Half => {
             let mid = (h * 0.5) as u32;
             for (y0, y1) in [(0, mid), (mid, img.height())] {
                 out.push(Piece {
                     img: band(img, y0, y1.max(y0 + 1)),
-                    tw: LANDSCAPE.0,
-                    th: LANDSCAPE.1,
+                    tw: lw,
+                    th: lh,
                 });
             }
         }
@@ -137,8 +165,8 @@ fn landscape_pieces(img: &GrayImage, split: Split, out: &mut Vec<Piece>) {
                 let y1 = ((s + sh) * h).round().clamp(0.0, h) as u32;
                 out.push(Piece {
                     img: band(img, y0, y1.max(y0 + 1)),
-                    tw: LANDSCAPE.0,
-                    th: LANDSCAPE.1,
+                    tw: lw,
+                    th: lh,
                 });
             }
         }
@@ -147,18 +175,20 @@ fn landscape_pieces(img: &GrayImage, split: Split, out: &mut Vec<Piece>) {
 
 /// Emit pieces for one normal (portrait-content) page under the current settings.
 fn emit_normal(img: &GrayImage, s: &Settings, out: &mut Vec<Piece>) {
+    let (pw, ph) = s.device.portrait();
     match s.orientation {
         Orientation::Portrait => out.push(Piece {
             img: img.clone(),
-            tw: PORTRAIT.0,
-            th: PORTRAIT.1,
+            tw: pw,
+            th: ph,
         }),
-        Orientation::Landscape => landscape_pieces(img, s.split, out),
+        Orientation::Landscape => landscape_pieces(img, s, out),
     }
 }
 
 /// Prepare one source image into ordered pieces (classify -> rotate -> trim -> spread/split).
 fn prepare_one(img: &GrayImage, common: f64, s: &Settings, out: &mut Vec<Piece>) {
+    let (pw, ph) = s.device.portrait();
     let class = classify(img.width(), img.height(), common);
     // 1) rotate rotated-portraits to portrait first
     let base = match class {
@@ -174,8 +204,8 @@ fn prepare_one(img: &GrayImage, common: f64, s: &Settings, out: &mut Vec<Piece>)
             // F = full (trimmed) spread rotated CW, ALWAYS a portrait page.
             out.push(Piece {
                 img: rotate_cw(&timg),
-                tw: PORTRAIT.0,
-                th: PORTRAIT.1,
+                tw: pw,
+                th: ph,
             });
             // split at midpoint of the trimmed spread; re-trim each half (inner gutter).
             let (tw, th) = (timg.width(), timg.height());
@@ -199,10 +229,10 @@ fn prepare_one(img: &GrayImage, common: f64, s: &Settings, out: &mut Vec<Piece>)
                 match s.orientation {
                     Orientation::Portrait => out.push(Piece {
                         img: half.clone(),
-                        tw: PORTRAIT.0,
-                        th: PORTRAIT.1,
+                        tw: pw,
+                        th: ph,
                     }),
-                    Orientation::Landscape => landscape_pieces(half, s.split, out),
+                    Orientation::Landscape => landscape_pieces(half, s, out),
                 }
             }
         }

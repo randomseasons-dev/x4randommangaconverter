@@ -1,9 +1,9 @@
-//! xtch-core: convert CBZ/CBR/image folders into `.xtch` for the XTEink X4/X3.
+//! xtch-core: convert CBZ/CBR/image folders into `.xtch` for XTEink readers (X4, X4 Pro, X3).
 
 pub mod pipeline;
 pub mod xtch;
 
-pub use pipeline::{convert_pages_stream, convert_streaming, Orientation, Settings, Split};
+pub use pipeline::{convert_pages_stream, convert_streaming, Device, Orientation, Settings, Split};
 pub use xtch::{assemble, encode_xtch, encoded_page, EncodedPage, Page};
 
 use image::GrayImage;
@@ -163,6 +163,50 @@ pub fn convert_stream(
     }
     let dims: Vec<(u32, u32)> = loaders.iter().map(|l| l.dims()).collect::<Result<_, _>>()?;
     convert_pages_stream(&dims, |i| loaders[i].load_luma(), settings, on_page, on_progress)
+}
+
+/// Parallel variant of [`convert_stream`]: decodes and processes images across all CPU
+/// cores in batches (to bound memory), then feeds finished pages to `on_page` in order.
+/// Output is identical to the sequential path. `on_progress(done)` fires per source image.
+pub fn convert_stream_par(
+    path: &Path,
+    settings: &Settings,
+    mut on_page: impl FnMut(Page) -> Result<(), String>,
+    mut on_progress: impl FnMut(usize),
+) -> Result<(), String> {
+    use rayon::prelude::*;
+    let loaders = list_input(path)?;
+    if loaders.is_empty() {
+        return Err("no images found in input".into());
+    }
+    let dims: Vec<(u32, u32)> = loaders.iter().map(|l| l.dims()).collect::<Result<_, _>>()?;
+    let common = pipeline::common_area(&dims);
+    let n = loaders.len();
+    const BATCH: usize = 96; // images processed per parallel wave (bounds memory)
+
+    let mut done = 0usize;
+    let mut start = 0usize;
+    while start < n {
+        let end = (start + BATCH).min(n);
+        // Parallel: decode + fully process each image into its ordered pages.
+        let batch: Vec<Result<Vec<Page>, String>> = (start..end)
+            .into_par_iter()
+            .map(|i| {
+                let img = loaders[i].load_luma()?;
+                Ok(pipeline::convert_one(&img, common, settings))
+            })
+            .collect();
+        // Sequential: drain in order, packing / writing downstream.
+        for res in batch {
+            for page in res? {
+                on_page(page)?;
+            }
+            done += 1;
+            on_progress(done);
+        }
+        start = end;
+    }
+    Ok(())
 }
 
 /// One-shot: read input, run the pipeline, return `.xtch` bytes.

@@ -1,4 +1,4 @@
-//! Byte-exact `.xtch` encoder for the XTEink X4/X3 (2-bit "XTH" pages).
+//! Byte-exact `.xtch` encoder for XTEink readers (2-bit "XTH" pages, any page size).
 //! Format reverse-engineered & validated against a real sample (round-trip byte-identical
 //! except one reader-ignored metadata u16). See project memory `xtch-format-spec`.
 

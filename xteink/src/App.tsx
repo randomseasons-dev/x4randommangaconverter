@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -6,7 +6,20 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "./App.css";
 
+type DeviceId = "x4" | "x4pro" | "x3";
+
+// Device profiles: the choice drives the page size used by the whole pipeline
+// (the backend holds the same table in `xtch_core::Device`).
+const DEVICES: { id: DeviceId; label: string; w: number; h: number }[] = [
+  { id: "x4", label: "XTEink X4", w: 480, h: 800 },
+  { id: "x4pro", label: "XTEink X4 Pro", w: 480, h: 800 },
+  { id: "x3", label: "XTEink X3", w: 528, h: 792 },
+];
+
+const TABS = ["Manga converter", "coming soon...", "coming soon..."];
+
 type Opts = {
+  device: DeviceId;
   orientation: "portrait" | "landscape";
   split: "none" | "half" | "thirds";
   preserve_ratio: boolean;
@@ -36,7 +49,10 @@ const baseName = (p: string) => p.split(/[\\/]/).pop() || p;
 
 export default function App() {
   const [files, setFiles] = useState<string[]>([]);
+  const [tab, setTab] = useState(0);
+  const [browseMenu, setBrowseMenu] = useState(false);
   const [opts, setOpts] = useState<Opts>({
+    device: "x4",
     orientation: "portrait",
     split: "none",
     preserve_ratio: true,
@@ -89,9 +105,12 @@ export default function App() {
     };
   }, []);
 
-  // Native drag-and-drop of files/folders onto the window.
+  // Native drag-and-drop of files/folders onto the window (Manga converter tab only).
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   useEffect(() => {
     const un = getCurrentWebview().onDragDropEvent((event) => {
+      if (tabRef.current !== 0) return;
       const t = event.payload.type;
       if (t === "enter" || t === "over") setDragging(true);
       else if (t === "leave") setDragging(false);
@@ -149,6 +168,22 @@ export default function App() {
   // Manga mode (RTL): left triangle advances; otherwise the right one does.
   const onLeftTriangle = () => (opts.manga_mode ? pvNext() : pvPrev());
   const onRightTriangle = () => (opts.manga_mode ? pvPrev() : pvNext());
+  // Forward triangle is green, backward red.
+  const leftTriClass = opts.manga_mode ? "tri tri-fwd" : "tri tri-back";
+  const rightTriClass = opts.manga_mode ? "tri tri-back" : "tri tri-fwd";
+
+  // Close the browse menu on any outside click or Escape.
+  useEffect(() => {
+    if (!browseMenu) return;
+    const close = () => setBrowseMenu(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [browseMenu]);
 
   const splitDisabled = opts.orientation === "portrait";
 
@@ -224,37 +259,71 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
-          XTEink <span>Manga Creator</span>
-        </div>
+        <nav className="tabs">
+          {TABS.map((label, i) => (
+            <button
+              key={i}
+              className={i === tab ? "tab active" : "tab"}
+              onClick={() => setTab(i)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
         <div className="tag">offline · .xtch</div>
       </header>
 
+      {tab !== 0 && <div className="panel coming-soon">Coming soon...</div>}
+
+      {tab === 0 && (
+      <>
       <main className="grid">
         {/* LEFT: dropzone + file list */}
         <section className="col">
           <div
             className={dragging ? "dropzone dragging" : "dropzone"}
-            onClick={addFiles}
+            onClick={(e) => {
+              e.stopPropagation();
+              setBrowseMenu((m) => !m);
+            }}
             role="button"
             tabIndex={0}
           >
             <div className="arrow">↑</div>
             <div className="dz-title">
-              {dragging ? "Drop to add" : "Drop or add CBZ / CBR files"}
+              {dragging ? (
+                "Drop to add"
+              ) : (
+                <>
+                  Drop files (CBZ / CBR) or picture folders here, or click to{" "}
+                  <span className="linklike">browse</span>.
+                </>
+              )}
             </div>
             <div className="dz-sub">
-              drag files/folders here, or click to browse ·{" "}
-              <button
-                className="linklike"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  addFolder();
-                }}
-              >
-                add an image folder
-              </button>
+              Output will be .xtch files for your xteink device with your
+              chosen settings.
             </div>
+            {browseMenu && (
+              <div className="browse-menu" onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => {
+                    setBrowseMenu(false);
+                    addFiles();
+                  }}
+                >
+                  CBZ / CBR files…
+                </button>
+                <button
+                  onClick={() => {
+                    setBrowseMenu(false);
+                    addFolder();
+                  }}
+                >
+                  Picture folder…
+                </button>
+              </div>
+            )}
           </div>
 
           {files.length > 0 && (
@@ -305,11 +374,15 @@ export default function App() {
         <section className="col">
           <div className="panel">
             <div className="panel-h">TARGET DEVICE</div>
-            <select value="x4" onChange={() => {}}>
-              <option value="x4">XTEink X4 (480×800)</option>
-              <option value="x3" disabled>
-                XTEink X3 — coming soon
-              </option>
+            <select
+              value={opts.device}
+              onChange={(e) => set("device", e.target.value as DeviceId)}
+            >
+              {DEVICES.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label} ({d.w}×{d.h})
+                </option>
+              ))}
             </select>
           </div>
 
@@ -435,13 +508,13 @@ export default function App() {
                   {pvLoading && <div className="preview-load">updating…</div>}
                 </div>
                 <div className="preview-nav">
-                  <button className="tri" onClick={onLeftTriangle}>
+                  <button className={leftTriClass} onClick={onLeftTriangle}>
                     ◀
                   </button>
                   <span className="pv-count">
                     {pvTotal > 0 ? `${pvIndex + 1} / ${pvTotal}` : "—"}
                   </span>
-                  <button className="tri" onClick={onRightTriangle}>
+                  <button className={rightTriClass} onClick={onRightTriangle}>
                     ▶
                   </button>
                 </div>
@@ -486,6 +559,8 @@ export default function App() {
             ))}
           </ul>
         </section>
+      )}
+      </>
       )}
 
       {/* PREVIEW MODAL */}
