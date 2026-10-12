@@ -1,9 +1,11 @@
 //! xtch-core: convert CBZ/CBR/image folders into `.xtch` for XTEink readers (X4, X4 Pro, X3).
 
 pub mod pipeline;
+pub mod wallpaper;
 pub mod xtch;
 
 pub use pipeline::{convert_pages_stream, convert_streaming, Device, Orientation, Settings, Split};
+pub use wallpaper::WallpaperSettings;
 pub use xtch::{assemble, encode_xtch, encoded_page, EncodedPage, Page};
 
 use image::GrayImage;
@@ -18,6 +20,34 @@ fn is_image_name(name: &str) -> bool {
         || n.ends_with(".webp")
         || n.ends_with(".bmp")
         || n.ends_with(".gif")
+}
+
+/// Picture files for the wallpaper maker: a folder's top-level images (sorted by name),
+/// or the path itself if it is an image file. Archives and other files give nothing.
+pub fn list_pictures(path: &Path) -> Vec<PathBuf> {
+    if path.is_dir() {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(path)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.is_file() && is_picture(p))
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort();
+        v
+    } else if path.is_file() && is_picture(path) {
+        vec![path.to_path_buf()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// True for a picture file name (jpg/png/webp/bmp/gif).
+pub fn is_picture(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .map(is_image_name)
+        .unwrap_or(false)
 }
 
 /// A lazily-loadable source image: either a file on disk or in-memory (compressed) bytes.

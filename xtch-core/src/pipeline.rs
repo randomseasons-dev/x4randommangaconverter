@@ -312,7 +312,7 @@ fn apply_contrast(g: &mut GrayImage, c: f32) {
 }
 
 /// Floyd–Steinberg dither to the 4 device gray levels {0,85,170,255}.
-fn dither(g: &GrayImage) -> Vec<u8> {
+pub(crate) fn dither(g: &GrayImage) -> Vec<u8> {
     let (w, h) = (g.width() as usize, g.height() as usize);
     let mut buf: Vec<f32> = g.pixels().map(|p| p.0[0] as f32).collect();
     const LEVELS: [f32; 4] = [0.0, 85.0, 170.0, 255.0];

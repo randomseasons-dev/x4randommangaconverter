@@ -1,3 +1,10 @@
+# Ver 1.6.0 changelog:
+- New **Wallpapers creator** tab: turn pictures (JPG / PNG / WEBP / BMP / GIF, or picture folders) into sleep-screen wallpapers for your device — 24-bit BMP at the exact screen size, always portrait.
+- Settings: Preserve pictures ratio · Resized To Fill Screen (recommended) · Black Border (unticked = white) · 4 gray levels dithering (highly recommended) · output as zip file.
+- Output: `<name>_screen.bmp` in an `xteink screens` subfolder, or one zip (`xteink screens.zip` / `<folder>_screens.zip`).
+- Phone photos are auto-rotated (EXIF); transparent pictures are flattened onto white.
+- The target device is now shared by all tabs.
+
 # Ver 1.5.0 changelog:
 - Renamed to xteink all-in-one converter (window, exe and installers) as more features will be added and separated in tabs. Currently the Manga Converter feature has been completed and is the default tab.
 - Manga converter feature: drop cbz files or simply the picture folder, the app will crop, trim, resize, convert....ect based on your settings. Output will be .xtch files which your xteink devices can read to display pictures. 
@@ -65,6 +72,13 @@ processing runs locally.
 The 2-bit `XTH` page format was reverse-engineered and validated against real device files:
 a container (`XTCH` magic, page directory) plus per-page two-bit-plane, column-major
 (right-to-left columns, 8 rows/byte) pixel data with a 4-level gray LUT.
+
+## Using the wallpapers
+
+- **Stock firmware:** copy the BMP anywhere on the card, open it on the device and choose
+  "Set as Power-off Screen".
+- **CrossPoint:** put one file at the card root as `sleep.bmp`, or several in a `/sleep/`
+  folder for a random pick on each sleep.
 
 ## Reading `.xtch` on the X4 Pro
 
