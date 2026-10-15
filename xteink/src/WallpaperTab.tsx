@@ -330,7 +330,8 @@ export default function WallpaperTab({
             </label>
 
             <div className="fixedinfo">
-              Always portrait · {dev.w}×{dev.h} · 24-bit BMP
+              Always portrait · {dev.w}×{dev.h} ·{" "}
+              {opts.dither ? "4-gray 8-bit BMP" : "24-bit BMP"}
             </div>
           </div>
         </section>

@@ -27,11 +27,25 @@ fn quantize(g: u8) -> u8 {
     best
 }
 
+/// Stored (width, height) of a page. Readers draw every page in portrait at the screen
+/// size, so a landscape page is stored rotated 90° clockwise (its top faces the screen's
+/// right edge; read with the device turned counter-clockwise).
+fn stored_dims(p: &Page) -> (u16, u16) {
+    if p.width > p.height {
+        (p.height, p.width)
+    } else {
+        (p.width, p.height)
+    }
+}
+
 /// Encode a single 2-bit page block (22-byte header + two bit-planes).
 /// Planes are column-major, columns stored right-to-left, 8 rows/byte (MSB = top).
 pub fn encode_page(p: &Page) -> Vec<u8> {
-    let w = p.width as usize;
-    let h = p.height as usize;
+    let (sw, sh) = stored_dims(p);
+    let rotate = sw != p.width;
+    let (src_w, src_h) = (p.width as usize, p.height as usize);
+    let w = sw as usize;
+    let h = sh as usize;
     let a = (h + 7) / 8; // bytes per column
     let plane = a * w;
     let mut low = vec![0u8; plane];
@@ -40,7 +54,13 @@ pub fn encode_page(p: &Page) -> Vec<u8> {
     for u in 0..w {
         let base = (w - 1 - u) * a; // columns right-to-left
         for b in 0..h {
-            let lvl = quantize(p.gray[b * w + u]);
+            // Rotated 90° CW: stored (u, b) comes from source (b, src_h - 1 - u).
+            let g = if rotate {
+                p.gray[(src_h - 1 - u) * src_w + b]
+            } else {
+                p.gray[b * src_w + u]
+            };
+            let lvl = quantize(g);
             let y = base + (b >> 3);
             let m = 7 - (b & 7);
             if lvl & 1 != 0 {
@@ -55,8 +75,8 @@ pub fn encode_page(p: &Page) -> Vec<u8> {
     let data_len = (2 * plane) as u32;
     let mut out = Vec::with_capacity(22 + 2 * plane);
     out.extend_from_slice(b"XTH\0"); // @0 magic
-    out.extend_from_slice(&p.width.to_le_bytes()); // @4
-    out.extend_from_slice(&p.height.to_le_bytes()); // @6
+    out.extend_from_slice(&sw.to_le_bytes()); // @4
+    out.extend_from_slice(&sh.to_le_bytes()); // @6
     out.extend_from_slice(&0u16.to_le_bytes()); // @8 flags = 0
     out.extend_from_slice(&data_len.to_le_bytes()); // @10 pixel-data length
     out.extend_from_slice(&[0u8; 8]); // @14..21 reserved (incl. @20 reader-ignored metadata)
@@ -74,11 +94,12 @@ pub struct EncodedPage {
     pub data: Vec<u8>,
 }
 
-/// Encode a page to its block form.
+/// Encode a page to its block form (landscape pages come out rotated to portrait).
 pub fn encoded_page(p: &Page) -> EncodedPage {
+    let (width, height) = stored_dims(p);
     EncodedPage {
-        width: p.width,
-        height: p.height,
+        width,
+        height,
         data: encode_page(p),
     }
 }

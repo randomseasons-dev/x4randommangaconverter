@@ -100,9 +100,80 @@ pub fn load_picture(path: &Path) -> Result<GrayImage, String> {
     Ok(out)
 }
 
-/// Load + convert one picture file to wallpaper BMP bytes.
+/// Load + convert one picture file to wallpaper BMP bytes, in the form CrossPoint shows
+/// without re-processing (see `encode_for_device`).
 pub fn render_bmp(path: &Path, s: &WallpaperSettings) -> Result<Vec<u8>, String> {
-    Ok(encode_bmp24(&make_wallpaper(&load_picture(path)?, s)))
+    Ok(encode_for_device(&make_wallpaper(&load_picture(path)?, s), s))
+}
+
+/// CrossPoint re-quantizes high-colour BMPs with its own cut-offs, which shifts our grays a
+/// level lighter. So:
+/// - dithered: an 8-bit BMP whose palette is exactly the 4 screen grays — CrossPoint treats
+///   it as native and maps each pixel straight to its level (no cut-offs, no re-dither);
+/// - plain gray: a 24-bit BMP tone-mapped so the device's cut-offs split it like an even
+///   4-level quantization would (X4 uses even cut-offs; X4 Pro/X3 the legacy 30/55/150).
+pub fn encode_for_device(g: &GrayImage, s: &WallpaperSettings) -> Vec<u8> {
+    if s.dither {
+        return encode_bmp8_4gray(g);
+    }
+    match s.device {
+        Device::X4 => encode_bmp24(g),
+        Device::X4Pro | Device::X3 => {
+            // even-quantization boundaries -> device boundaries, piecewise linear
+            const PTS: [(f32, f32); 5] =
+                [(0.0, 0.0), (42.5, 30.0), (127.5, 55.0), (212.5, 150.0), (255.0, 255.0)];
+            let lut: Vec<u8> = (0..256)
+                .map(|v| {
+                    let v = v as f32;
+                    let k = PTS.windows(2).position(|w| v <= w[1].0).unwrap_or(3);
+                    let ((x0, y0), (x1, y1)) = (PTS[k], PTS[k + 1]);
+                    (y0 + (v - x0) * (y1 - y0) / (x1 - x0)).round() as u8
+                })
+                .collect();
+            let mut t = g.clone();
+            for p in t.pixels_mut() {
+                p.0[0] = lut[p.0[0] as usize];
+            }
+            encode_bmp24(&t)
+        }
+    }
+}
+
+/// Uncompressed 8-bit palettized BMP with a 4-entry palette {0, 85, 170, 255}; pixels must
+/// already be on those levels (the dithered output is).
+pub fn encode_bmp8_4gray(g: &GrayImage) -> Vec<u8> {
+    let (w, h) = (g.width() as usize, g.height() as usize);
+    let row = (w + 3) & !3; // rows padded to 4 bytes
+    let data_off = 54 + 4 * 4;
+    let data_len = row * h;
+    let mut out = Vec::with_capacity(data_off + data_len);
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&((data_off + data_len) as u32).to_le_bytes()); // file size
+    out.extend_from_slice(&[0u8; 4]); // reserved
+    out.extend_from_slice(&(data_off as u32).to_le_bytes()); // pixel data offset
+    out.extend_from_slice(&40u32.to_le_bytes()); // BITMAPINFOHEADER size
+    out.extend_from_slice(&(w as i32).to_le_bytes());
+    out.extend_from_slice(&(h as i32).to_le_bytes()); // positive = bottom-up rows
+    out.extend_from_slice(&1u16.to_le_bytes()); // planes
+    out.extend_from_slice(&8u16.to_le_bytes()); // bits per pixel
+    out.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB (no compression)
+    out.extend_from_slice(&(data_len as u32).to_le_bytes());
+    out.extend_from_slice(&2835i32.to_le_bytes()); // 72 DPI
+    out.extend_from_slice(&2835i32.to_le_bytes());
+    out.extend_from_slice(&4u32.to_le_bytes()); // palette colours
+    out.extend_from_slice(&4u32.to_le_bytes()); // important colours
+    for v in [0u8, 85, 170, 255] {
+        out.extend_from_slice(&[v, v, v, 0]); // B, G, R, reserved
+    }
+    let pad = row - w;
+    for y in (0..h).rev() {
+        for x in 0..w {
+            let v = g.get_pixel(x as u32, y as u32).0[0] as u32;
+            out.push(((v + 42) / 85).min(3) as u8); // palette index of the nearest level
+        }
+        out.extend(std::iter::repeat(0u8).take(pad));
+    }
+    out
 }
 
 /// Render many pictures across all CPU cores in bounded batches; `on_each(i, result)`
@@ -128,8 +199,7 @@ pub fn render_bmp_par(
     }
 }
 
-/// Uncompressed 24-bit BMP (BITMAPINFOHEADER, BI_RGB, bottom-up) — the format the
-/// XTEink stock firmware and CrossPoint both read for sleep screens.
+/// Uncompressed 24-bit BMP (BITMAPINFOHEADER, BI_RGB, bottom-up).
 pub fn encode_bmp24(g: &GrayImage) -> Vec<u8> {
     let (w, h) = (g.width() as usize, g.height() as usize);
     let row = (w * 3 + 3) & !3; // rows padded to 4 bytes
