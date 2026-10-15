@@ -1,5 +1,5 @@
 # Ver 1.6.1 changelog (bug fixes):
-- **Fixed: Landscape-mode .xtch files showed wrongly cut pages and froze the device.** Landscape pages were stored as 800×480, but readers always draw pages in portrait at the screen size. Every page is now stored at the screen size (480×800, X3 528×792), with landscape pages turned 90° — read them with the device turned to the left (counter-clockwise). Portrait output is unchanged. Re-convert old landscape files.
+- **Fixed: Landscape-mode .xtch files showed wrongly cut pages on Crosspoint firmware.** Landscape pages were stored as 800×480, but Crosspoint firmwares always draw pages in portrait at the screen size. Every page is now stored at the screen size (480×800, X3 528×792), with landscape pages turned 90° — read them with the device turned to the left (counter-clockwise). Portrait output is unchanged. Re-convert old landscape files.
 - **Fixed: Wallpapers looked washed out on the sleep screen.** CrossPoint re-sorted our grays one shade lighter. Dithered wallpapers are now saved with exactly the 4 screen grays (8-bit BMP), so the device shows them as previewed; undithered wallpapers are darkened to match each device's gray levels.
 
 # Ver 1.6.0 changelog:
